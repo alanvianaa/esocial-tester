@@ -2,6 +2,7 @@ name: Build and Release Executables
 
 on:
   release:
+    # Aciona o workflow quando uma release é criada (incluindo rascunhos)
     types: [created]
 
 permissions:
@@ -12,14 +13,14 @@ jobs:
     name: Build on ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest] # Removido 'macos-latest'
         include:
           - os: ubuntu-latest
             asset_name: eSocial-tester-linux
             asset_path: dist/eSocial-tester
-          - os: macos-latest
-            asset_name: eSocial-tester-macos
-            asset_path: dist/eSocial-tester
+          # - os: macos-latest
+          #   asset_name: eSocial-tester-macos
+          #   asset_path: dist/eSocial-tester
           - os: windows-latest
             asset_name: eSocial-tester-windows.exe
             asset_path: dist/eSocial-tester.exe
@@ -42,4 +43,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
-          gh release upload ${{ github.event.release.tag_name }} ${{ matrix.asset_path }} --clobber
+          gh release upload ${{ github.event.release.tag_name }} "${{ matrix.asset_path }}#${{ matrix.asset_name }}" --clobber
