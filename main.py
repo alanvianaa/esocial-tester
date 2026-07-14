@@ -1,18 +1,20 @@
 """
-Teste de conectividade com os servidores do eSocial.
-
-Forma recomendada pela documentação oficial e por integradores: estabelecer
-conexão TLS 1.2 na porta 443 (equivalente a `openssl s_client -connect host:443
--CAfile icp-brasil.crt -tls1_2`). Não exige certificado digital do cliente.
+Monitor de conectividade contínuo com os servidores do eSocial.
 """
 
 import os
 import socket
 import ssl
-import subprocess
 import sys
+import time
+from collections import deque
 
+# --- Configurações ---
+CHECK_INTERVAL_SECONDS = 3
+HISTORY_SIZE = 60
 TIMEOUT = 10
+CERT_PEM_FILENAME = "Cacert.pem"
+# ---------------------
 
 # Hosts oficiais (Manual de Orientação do Desenvolvedor)
 HOSTS = {
@@ -25,101 +27,108 @@ HOSTS = {
     ],
 }
 
-JKS_PASSWORD = "changeit"
+STATUS_MAP = {
+    "OK":   {"bar": "█", "text": "Online"},
+    "WARN": {"bar": "▒", "text": "Aviso Cert."},
+    "FAIL": {"bar": "░", "text": "Offline"},
+}
 
 
-def jks_to_pem(jks_path: str) -> str:
-    """Converte keystore JKS (ICP-Brasil) para PEM, reutilizando cache."""
-    pem_path = jks_path + ".pem"
-    if os.path.isfile(pem_path) and os.path.getmtime(pem_path) >= os.path.getmtime(jks_path):
-        return pem_path
-
-    base, _ = os.path.splitext(jks_path)
-    p12_path = base + ".p12"
-
-    subprocess.run(
-        [
-            "keytool", "-importkeystore",
-            "-srckeystore", jks_path,
-            "-destkeystore", p12_path,
-            "-deststoretype", "PKCS12",
-            "-srcstorepass", JKS_PASSWORD,
-            "-deststorepass", JKS_PASSWORD,
-            "-noprompt",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        [
-            "openssl", "pkcs12",
-            "-in", p12_path,
-            "-out", pem_path,
-            "-nokeys", "-nodes",
-            "-passin", f"pass:{JKS_PASSWORD}",
-            "-legacy",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    return pem_path
-
-
-def test_tls(host: str, ca_pem: str) -> tuple[bool, bool, str]:
-    """
-    Testa conectividade TLS 1.2 com o host.
-    Retorna (handshake_ok, cert_ok, detalhe).
-    """
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+def test_tls(host: str, ca_pem: str) -> str:
+    """Testa a conectividade TLS com um host e retorna o status ('OK', 'WARN', 'FAIL')."""
+    context = ssl.create_default_context(cafile=ca_pem)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
-    context.load_verify_locations(cafile=ca_pem)
-
+    
     try:
         with socket.create_connection((host, 443), timeout=TIMEOUT) as sock:
-            with context.wrap_socket(sock, server_hostname=host) as tls:
-                return True, True, f"TLS {tls.version()} — certificado validado"
-    except ssl.SSLCertVerificationError as e:
-        return True, False, f"TLS conectou, mas certificado não validado: {e.verify_message}"
-    except (OSError, ssl.SSLError) as e:
-        return False, False, str(e)
+            with context.wrap_socket(sock, server_hostname=host):
+                return "OK"
+    except ssl.SSLCertVerificationError:
+        return "WARN"
+    except (OSError, ssl.SSLError):
+        return "FAIL"
 
 
-def test_environment(env_name: str, services: list[tuple[str, str]], ca_jks: str) -> None:
-    print(f"\n--- {env_name} ---")
-    ca_pem = jks_to_pem(ca_jks)
+def generate_status_display(history: dict) -> str:
+    col_widths = {"service": 45, "status": 15, "history": HISTORY_SIZE}
+    
+    top_border = f"┌{'─' * col_widths['service']}┬{'─' * col_widths['status']}┬{'─' * col_widths['history']}┐"
+    header_sep = f"├{'─' * col_widths['service']}┼{'─' * col_widths['status']}┼{'─' * col_widths['history']}┤"
+    bottom_border = f"└{'─' * col_widths['service']}┴{'─' * col_widths['status']}┴{'─' * col_widths['history']}┘"
 
-    for label, host in services:
-        handshake_ok, cert_ok, detail = test_tls(host, ca_pem)
+    lines = []
+    update_time = time.strftime('%d/%m/%Y %X')
+    
+    title = f"Status dos Serviços eSocial (Último update: {update_time})"
+    lines.append(title)
+    
+    lines.append(top_border)
+    header = (f"│{'Serviço':<{col_widths['service']}}"
+              f"│{'Status Atual':^{col_widths['status']}}"
+              f"│{'Histórico Recente':<{col_widths['history']}}│")
+    lines.append(header)
+    lines.append(header_sep)
 
-        if handshake_ok and cert_ok:
-            print(f"✅ {label} ({host}): {detail}")
-        elif handshake_ok:
-            print(f"⚠️  {label} ({host}): servidor acessível — {detail}")
-        else:
-            print(f"❌ {label} ({host}): {detail}")
+    for env, services in HOSTS.items():
+        for label, host in services:
+            service_history = history.get(host, deque())
+            
+            if not service_history:
+                status_text = "Verificando..."
+                history_bar = ""
+            else:
+                last_status = service_history[-1]
+                status_text = STATUS_MAP[last_status]["text"]
+                history_bar = "".join(STATUS_MAP[s]["bar"] for s in service_history)
+            
+            service_name = f"{env} - {label}"
+            padding = " " * (col_widths['history'] - len(history_bar))
+            
+            row = (f"│{service_name:<{col_widths['service']}}"
+                   f"│{status_text:^{col_widths['status']}}"
+                   f"│{history_bar + padding}│")
+            lines.append(row)
+            
+    lines.append(bottom_border)
+    return "\n".join(lines)
 
 
-def main() -> int:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    cert_dir = os.path.join(base_dir, "cert")
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
 
-    for tool in ("keytool", "openssl"):
-        if subprocess.run(["which", tool], capture_output=True).returncode != 0:
-            print(f"Erro: '{tool}' não encontrado. Instale o JDK (keytool) e o OpenSSL.")
-            return 1
+def hide_cursor():
+    sys.stdout.write("\x1b[?25l")
+    sys.stdout.flush()
 
-    test_environment(
-        "Produção Restrita",
-        HOSTS["Produção Restrita"],
-        os.path.join(cert_dir, "Cacert"),
-    )
-    test_environment(
-        "Produção",
-        HOSTS["Produção"],
-        os.path.join(cert_dir, "Cacert"),
-    )
-    return 0
+def run_monitor_loop(ca_pem: str):
+    all_services = [host for _, services in HOSTS.items() for _, host in services]
+    history = {host: deque(maxlen=HISTORY_SIZE) for host in all_services}
+    hide_cursor()
+
+    while True:
+        start_time = time.time()
+
+        for host in all_services:
+            status = test_tls(host, ca_pem)
+            history[host].append(status)
+
+        clear_screen()
+        display_text = generate_status_display(history)
+        print(display_text)
+
+        elapsed_time = time.time() - start_time
+        sleep_time = max(0, CHECK_INTERVAL_SECONDS - elapsed_time)
+        time.sleep(sleep_time)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        ca_pem_path = os.path.join(base_dir, CERT_PEM_FILENAME)
+        run_monitor_loop(ca_pem_path)
+    except KeyboardInterrupt:
+        print("\nMonitoramento interrompido.")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\nOcorreu um erro inesperado: {e}")
+        sys.exit(1)
