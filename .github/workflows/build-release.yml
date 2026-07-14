@@ -2,7 +2,10 @@ name: Build and Release Executables
 
 on:
   release:
-    types: [published]
+    types: [created]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -36,11 +39,7 @@ jobs:
         run: python build.py
 
       - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ${{ matrix.asset_path }}
-          asset_name: ${{ matrix.asset_name }}
-          asset_content_type: application/octet-stream
+        run: >
+          gh release upload ${{ github.event.release.tag_name }} ${{ matrix.asset_path }} --clobber
