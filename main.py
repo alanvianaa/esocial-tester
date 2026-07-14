@@ -59,13 +59,10 @@ def generate_status_display(history: dict) -> str:
     lines = []
     update_time = time.strftime('%d/%m/%Y %X')
     
-    title = f"Status dos Serviços eSocial (Último update: {update_time})"
-    lines.append(title)
-    
     lines.append(top_border)
     header = (f"│{'Serviço':<{col_widths['service']}}"
               f"│{'Status Atual':^{col_widths['status']}}"
-              f"│{'Histórico Recente':<{col_widths['history']}}│")
+              f"│{f"Histórico Recente (Último update: {update_time})":<{col_widths['history']}}│")
     lines.append(header)
     lines.append(header_sep)
 
