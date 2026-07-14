@@ -62,7 +62,7 @@ def generate_status_display(history: dict) -> str:
     lines.append(top_border)
     header = (f"│{'Serviço':<{col_widths['service']}}"
               f"│{'Status Atual':^{col_widths['status']}}"
-              f"│{f"Histórico Recente (Último update: {update_time})":<{col_widths['history']}}│")
+              f"│{f'Histórico Recente (Último update: {update_time})':<{col_widths['history']}}│")
     lines.append(header)
     lines.append(header_sep)
 
@@ -120,7 +120,11 @@ def run_monitor_loop(ca_pem: str):
 
 if __name__ == "__main__":
     try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            base_dir = sys._MEIPASS
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+        
         ca_pem_path = os.path.join(base_dir, CERT_PEM_FILENAME)
         run_monitor_loop(ca_pem_path)
     except KeyboardInterrupt:

@@ -1,0 +1,46 @@
+name: Build and Release Executables
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            asset_name: eSocial-tester-linux
+            asset_path: dist/eSocial-tester
+          - os: macos-latest
+            asset_name: eSocial-tester-macos
+            asset_path: dist/eSocial-tester
+          - os: windows-latest
+            asset_name: eSocial-tester-windows.exe
+            asset_path: dist/eSocial-tester.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Run PyInstaller build
+        run: python build.py
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ${{ matrix.asset_path }}
+          asset_name: ${{ matrix.asset_name }}
+          asset_content_type: application/octet-stream
